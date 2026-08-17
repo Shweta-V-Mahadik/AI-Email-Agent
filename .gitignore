@@ -3,3 +3,4 @@ venv/
 __pycache__/
 *.pyc
 emails.db
+node_modules/
