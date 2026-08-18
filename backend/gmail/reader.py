@@ -267,128 +267,89 @@ def get_emails(limit=20):
 
     mail = connect_to_gmail()
 
-
     try:
 
-        mail.select(
-            "INBOX"
-        )
+        mail.select("INBOX")
 
-
-        status, messages = mail.search(
-
-            None,
-
-            "ALL"
-
-        )
-
+        status, messages = mail.search(None, "ALL")
 
         if status != "OK":
 
             return []
 
-
         email_ids = messages[0].split()
-
 
         # Get latest emails
 
         email_ids = email_ids[-limit:]
 
+        if not email_ids:
+
+            return []
+
+        # Batch fetch all requested emails in a single IMAP command
+
+        fetch_str = b",".join(email_ids)
+
+        status, msg_data = mail.fetch(fetch_str, "(BODY.PEEK[])")
+
+        if status != "OK":
+
+            return []
+
+        id_map = {}
+
+        for item in msg_data:
+
+            if isinstance(item, tuple):
+
+                header_info = item[0].decode('utf-8', errors='ignore')
+
+                msg_id = header_info.split()[0]
+
+                raw_email = item[1]
+
+                if not raw_email:
+
+                    continue
+
+                msg = email.message_from_bytes(raw_email)
+
+                sender = decode_text(msg.get("From"))
+
+                subject = decode_text(msg.get("Subject"))
+
+                date = msg.get("Date")
+
+                body = extract_body(msg)
+
+                id_map[msg_id] = {
+
+                    "id": msg_id,
+
+                    "sender": sender,
+
+                    "subject": subject,
+
+                    "date": date,
+
+                    "body": body
+
+                }
 
         results = []
 
-
         # Newest first
 
-        for email_id in reversed(
-            email_ids
-        ):
+        for email_id in reversed(email_ids):
 
-            status, msg_data = mail.fetch(
+            eid_str = email_id.decode() if isinstance(email_id, bytes) else str(email_id)
 
-                email_id,
+            if eid_str in id_map:
 
-                "(RFC822)"
-
-            )
-
-
-            if status != "OK":
-
-                continue
-
-
-            raw_email = None
-
-
-            for response_part in msg_data:
-
-                if isinstance(
-                    response_part,
-                    tuple
-                ):
-
-                    raw_email = (
-                        response_part[1]
-                    )
-
-                    break
-
-
-            if not raw_email:
-
-                continue
-
-
-            msg = email.message_from_bytes(
-                raw_email
-            )
-
-
-            sender = decode_text(
-                msg.get("From")
-            )
-
-
-            subject = decode_text(
-                msg.get("Subject")
-            )
-
-
-            date = msg.get(
-                "Date"
-            )
-
-
-            body = extract_body(
-                msg
-            )
-
-
-            results.append({
-
-                "id":
-                    email_id.decode(),
-
-                "sender":
-                    sender,
-
-                "subject":
-                    subject,
-
-                "date":
-                    date,
-
-                "body":
-                    body
-
-            })
-
+                results.append(id_map[eid_str])
 
         return results
-
 
     finally:
 
@@ -405,103 +366,83 @@ def get_emails(limit=20):
 # GET ONE SPECIFIC EMAIL
 # =========================================================
 #
-# This is used when the user selects ONE email
-# and clicks "Process with AI".
+# Check local database cache first, fallback to Gmail IMAP.
 #
 # =========================================================
 
 def get_email_by_id(gmail_id):
 
-    mail = connect_to_gmail()
+    from database import get_email
 
+    # Check local DB cache first
+
+    db_match = get_email(gmail_id)
+
+    if db_match and db_match.get("body"):
+
+        return {
+
+            "id": str(gmail_id),
+
+            "sender": db_match.get("sender", ""),
+
+            "subject": db_match.get("subject", ""),
+
+            "date": db_match.get("date", ""),
+
+            "body": db_match.get("body", "")
+
+        }
+
+    mail = connect_to_gmail()
 
     try:
 
-        mail.select(
-            "INBOX"
-        )
+        mail.select("INBOX")
 
-
-        status, msg_data = mail.fetch(
-
-            gmail_id,
-
-            "(RFC822)"
-
-        )
-
+        status, msg_data = mail.fetch(gmail_id, "(BODY.PEEK[])")
 
         if status != "OK":
 
             return None
 
-
         raw_email = None
-
 
         for response_part in msg_data:
 
-            if isinstance(
-                response_part,
-                tuple
-            ):
+            if isinstance(response_part, tuple):
 
-                raw_email = (
-                    response_part[1]
-                )
+                raw_email = response_part[1]
 
                 break
-
 
         if not raw_email:
 
             return None
 
+        msg = email.message_from_bytes(raw_email)
 
-        msg = email.message_from_bytes(
-            raw_email
-        )
+        sender = decode_text(msg.get("From"))
 
+        subject = decode_text(msg.get("Subject"))
 
-        sender = decode_text(
-            msg.get("From")
-        )
+        date = msg.get("Date")
 
-
-        subject = decode_text(
-            msg.get("Subject")
-        )
-
-
-        date = msg.get(
-            "Date"
-        )
-
-
-        body = extract_body(
-            msg
-        )
-
+        body = extract_body(msg)
 
         return {
 
-            "id":
-                str(gmail_id),
+            "id": str(gmail_id),
 
-            "sender":
-                sender,
+            "sender": sender,
 
-            "subject":
-                subject,
+            "subject": subject,
 
-            "date":
-                date,
+            "date": date,
 
-            "body":
-                body
+            "body": body
 
         }
-
 
     finally:
 

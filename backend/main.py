@@ -15,7 +15,8 @@ from database import (
     get_all_emails,
     get_email,
     update_generated_reply,
-    mark_reply_sent
+    mark_reply_sent,
+    cache_raw_emails
 )
 
 
@@ -92,7 +93,14 @@ def home():
 @app.get("/gmail/emails")
 def gmail_emails():
     try:
-        raw_emails = get_emails(limit=20)
+        raw_emails = []
+        try:
+            raw_emails = get_emails(limit=20)
+            if raw_emails:
+                cache_raw_emails(raw_emails)
+        except Exception as imap_err:
+            print("IMAP Fetch Warning:", imap_err)
+
         db_emails = get_all_emails()
 
         db_map = {}
@@ -102,37 +110,57 @@ def gmail_emails():
                 db_map[gid] = item
 
         merged_emails = []
-        for e in raw_emails:
-            gid = str(e.get("id", ""))
-            if gid in db_map:
-                db_item = db_map[gid]
+
+        if raw_emails:
+            for e in raw_emails:
+                gid = str(e.get("id", ""))
+                if gid in db_map:
+                    db_item = db_map[gid]
+                    merged_emails.append({
+                        "id": gid,
+                        "db_id": db_item.get("id"),
+                        "gmail_id": gid,
+                        "sender": e.get("sender") or db_item.get("sender"),
+                        "subject": e.get("subject") or db_item.get("subject"),
+                        "body": e.get("body") or db_item.get("body"),
+                        "date": e.get("date") or db_item.get("date"),
+                        "summary": db_item.get("summary", ""),
+                        "category": db_item.get("category", ""),
+                        "generated_reply": db_item.get("generated_reply", ""),
+                        "reply_sent": db_item.get("reply_sent", 0),
+                        "processed": db_item.get("processed", 0)
+                    })
+                else:
+                    merged_emails.append({
+                        "id": gid,
+                        "gmail_id": gid,
+                        "sender": e.get("sender"),
+                        "subject": e.get("subject"),
+                        "body": e.get("body"),
+                        "date": e.get("date"),
+                        "summary": "",
+                        "category": "",
+                        "generated_reply": "",
+                        "reply_sent": 0,
+                        "processed": 0
+                    })
+        else:
+            # Fallback to local DB emails if IMAP returned empty or errored
+            for item in db_emails:
+                gid = str(item.get("gmail_id", ""))
                 merged_emails.append({
-                    "id": gid,
-                    "db_id": db_item.get("id"),
+                    "id": gid or str(item.get("id", "")),
+                    "db_id": item.get("id"),
                     "gmail_id": gid,
-                    "sender": e.get("sender") or db_item.get("sender"),
-                    "subject": e.get("subject") or db_item.get("subject"),
-                    "body": e.get("body") or db_item.get("body"),
-                    "date": e.get("date") or db_item.get("date"),
-                    "summary": db_item.get("summary", ""),
-                    "category": db_item.get("category", ""),
-                    "generated_reply": db_item.get("generated_reply", ""),
-                    "reply_sent": db_item.get("reply_sent", 0),
-                    "processed": db_item.get("processed", 1)
-                })
-            else:
-                merged_emails.append({
-                    "id": gid,
-                    "gmail_id": gid,
-                    "sender": e.get("sender"),
-                    "subject": e.get("subject"),
-                    "body": e.get("body"),
-                    "date": e.get("date"),
-                    "summary": "",
-                    "category": "",
-                    "generated_reply": "",
-                    "reply_sent": 0,
-                    "processed": 0
+                    "sender": item.get("sender"),
+                    "subject": item.get("subject"),
+                    "body": item.get("body"),
+                    "date": item.get("date"),
+                    "summary": item.get("summary", ""),
+                    "category": item.get("category", ""),
+                    "generated_reply": item.get("generated_reply", ""),
+                    "reply_sent": item.get("reply_sent", 0),
+                    "processed": item.get("processed", 0)
                 })
 
         return {

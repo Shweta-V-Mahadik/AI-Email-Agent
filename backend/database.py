@@ -153,6 +153,74 @@ def save_email(
 
 
 # =========================================================
+# CACHE RAW EMAILS FROM GMAIL
+# =========================================================
+
+def cache_raw_emails(emails_list):
+
+    if not emails_list:
+        return
+
+    connection = get_connection()
+
+    cursor = connection.cursor()
+
+    for e in emails_list:
+
+        gid = str(e.get("id") or e.get("gmail_id") or "")
+
+        if not gid:
+            continue
+
+        cursor.execute("""
+            INSERT INTO emails
+            (
+                gmail_id,
+                sender,
+                subject,
+                body,
+                date,
+                summary,
+                category,
+                generated_reply,
+                reply_sent,
+                processed
+            )
+
+            VALUES (?, ?, ?, ?, ?, '', '', '', 0, 0)
+
+            ON CONFLICT(gmail_id)
+
+            DO UPDATE SET
+
+                sender = excluded.sender,
+
+                subject = excluded.subject,
+
+                body = excluded.body,
+
+                date = excluded.date
+
+        """, (
+
+            gid,
+
+            e.get("sender") or "",
+
+            e.get("subject") or "",
+
+            e.get("body") or "",
+
+            e.get("date") or ""
+
+        ))
+
+    connection.commit()
+
+    connection.close()
+
+
+# =========================================================
 # GET ALL EMAILS
 # =========================================================
 
